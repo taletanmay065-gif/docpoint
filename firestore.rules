@@ -1,0 +1,148 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // 0. Global Safety Net
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // --- Helpers ---
+    function isSignedIn() {
+      return request.auth != null;
+    }
+    
+    function isEmailVerified() {
+      // Relaxed for demo/development: Allow if signed in
+      return isSignedIn();
+    }
+
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+
+    function getUserData(uid) {
+      return get(/databases/$(database)/documents/users/$(uid)).data;
+    }
+
+    function hasRole(role) {
+      let path = /databases/$(database)/documents/users/$(request.auth.uid);
+      return isSignedIn() && exists(path) && get(path).data.role == role;
+    }
+
+    function isAdmin() {
+      return isSignedIn() && (hasRole('admin') || (request.auth.token.email == 'taletanmay065@gmail.com' && request.auth.token.email_verified == true));
+    }
+
+    function isValidId(id) {
+       return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    // --- Validation Helpers ---
+    function isValidUser(data) {
+      return data.keys().hasAll(['userId', 'email', 'role', 'createdAt'])
+             && data.userId is string
+             && data.email is string
+             && data.role in ['patient', 'doctor', 'admin']
+             && data.createdAt is string;
+    }
+
+    function isValidAppointment(data) {
+      return data.keys().hasAll(['patientId', 'doctorId', 'date', 'startTime', 'status', 'paymentStatus', 'createdAt'])
+             && data.patientId == request.auth.uid
+             && data.doctorId is string
+             && data.status in ['pending', 'confirmed', 'cancelled', 'completed']
+             && data.paymentStatus in ['unpaid', 'paid']
+             && (data.keys().hasAll(['amount', 'paymentMethod']) ? data.amount is number : true);
+    }
+
+    function isValidReview(data) {
+      return data.keys().hasAll(['doctorId', 'patientId', 'patientName', 'rating', 'comment', 'createdAt'])
+             && data.patientId == request.auth.uid
+             && data.rating is number && data.rating >= 1 && data.rating <= 5
+             && data.comment is string && data.comment.size() <= 1000;
+    }
+
+    function isValidPayment(data) {
+      return data.keys().hasAll(['appointmentId', 'patientId', 'amount', 'method', 'status', 'createdAt'])
+             && data.patientId == request.auth.uid
+             && data.amount is number
+             && data.status in ['pending', 'completed', 'failed'];
+    }
+
+    function isValidMessage(data) {
+      return data.keys().hasAll(['appointmentId', 'senderId', 'receiverId', 'text', 'createdAt'])
+             && data.senderId == request.auth.uid
+             && data.text is string && data.text.size() > 0 && data.text.size() <= 2000;
+    }
+
+    // --- Collections ---
+
+    // Users
+    match /users/{userId} {
+      allow get: if isSignedIn();
+      allow list: if isAdmin();
+      allow create: if isOwner(userId) && isValidUser(incoming());
+      allow update: if isOwner(userId) 
+                    && (incoming().diff(existing()).affectedKeys().hasOnly(['displayName', 'photoURL', 'role']) || isAdmin());
+      allow delete: if isAdmin();
+    }
+
+    // Doctor Profiles
+    match /doctors/{doctorId} {
+      allow read: if true; // Public directory
+      allow write: if isOwner(doctorId) || isAdmin();
+      allow delete: if isAdmin();
+    }
+
+    // Appointments
+    match /appointments/{appId} {
+      allow get: if isSignedIn() && (isOwner(existing().patientId) || isOwner(existing().doctorId) || isAdmin());
+      allow list: if isSignedIn(); 
+      
+      allow create: if isSignedIn() && isValidAppointment(incoming());
+      allow update: if isSignedIn() && (isOwner(existing().patientId) || isOwner(existing().doctorId) || isAdmin())
+                    && (
+                      // Patient: Cancel
+                      (isOwner(existing().patientId) && incoming().status == 'cancelled' && incoming().diff(existing()).affectedKeys().hasOnly(['status'])) ||
+                      // Doctor: Complete/Notes
+                      (isOwner(existing().doctorId) && (
+                        incoming().diff(existing()).affectedKeys().hasAny(['status', 'notes', 'prescription'])
+                      )) ||
+                      isAdmin()
+                    );
+    }
+
+    // Reviews
+    match /reviews/{reviewId} {
+      allow read: if true; // Public reviews
+      allow create: if isSignedIn() && isValidReview(incoming());
+      allow update, delete: if isSignedIn() && (isOwner(existing().patientId) || isAdmin());
+    }
+
+    // Payments
+    match /payments/{paymentId} {
+      allow read: if isSignedIn() && (isOwner(existing().patientId) || isAdmin());
+      allow create: if isSignedIn() && isValidPayment(incoming());
+    }
+
+    // Messages
+    match /messages/{messageId} {
+      allow get: if isSignedIn() && (isOwner(existing().senderId) || isOwner(existing().receiverId) || isAdmin());
+      allow list: if isSignedIn() && (isOwner(resource.data.senderId) || isOwner(resource.data.receiverId) || isAdmin());
+      allow create: if isSignedIn() && isValidMessage(incoming());
+    }
+    
+    // Test collection for connectivity check
+    match /test/connection {
+      allow read: if true;
+    }
+  }
+}

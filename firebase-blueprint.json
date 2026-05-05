@@ -1,0 +1,102 @@
+{
+  "entities": {
+    "User": {
+      "title": "User",
+      "description": "Base user profile for patients, doctors, and admins.",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "email": { "type": "string", "format": "email" },
+        "displayName": { "type": "string" },
+        "role": { "type": "string", "enum": ["patient", "doctor", "admin"] },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "photoURL": { "type": "string" }
+      },
+      "required": ["userId", "email", "role"]
+    },
+    "DoctorProfile": {
+      "title": "Doctor Profile",
+      "description": "Extended profile for medical professionals.",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "specialization": { "type": "string" },
+        "experience": { "type": "number" },
+        "fees": { "type": "number" },
+        "description": { "type": "string" },
+        "rating": { "type": "number" },
+        "availability": {
+          "type": "object",
+          "description": "Weekly availability schedule"
+        }
+      },
+      "required": ["userId", "specialization", "fees"]
+    },
+    "Appointment": {
+      "title": "Appointment",
+      "description": "A booking record between a patient and a doctor.",
+      "type": "object",
+      "properties": {
+        "appointmentId": { "type": "string" },
+        "patientId": { "type": "string" },
+        "doctorId": { "type": "string" },
+        "date": { "type": "string" },
+        "startTime": { "type": "string" },
+        "status": { "type": "string", "enum": ["pending", "confirmed", "cancelled", "completed"] },
+        "paymentStatus": { "type": "string", "enum": ["unpaid", "paid"] },
+        "notes": { "type": "string" },
+        "prescription": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["patientId", "doctorId", "date", "startTime", "status"]
+    },
+    "Slot": {
+      "title": "Available Slot",
+      "description": "A specific time block available for booking.",
+      "type": "object",
+      "properties": {
+        "doctorId": { "type": "string" },
+        "date": { "type": "string" },
+        "startTime": { "type": "string" },
+        "endTime": { "type": "string" },
+        "isBooked": { "type": "boolean" }
+      },
+      "required": ["doctorId", "date", "startTime", "endTime"]
+    },
+    "Message": {
+      "title": "Chat Message",
+      "description": "A secure message sent between patient and doctor.",
+      "type": "object",
+      "properties": {
+        "appointmentId": { "type": "string" },
+        "senderId": { "type": "string" },
+        "receiverId": { "type": "string" },
+        "text": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["appointmentId", "senderId", "receiverId", "text", "createdAt"]
+    }
+  },
+  "firestore": {
+    "users": {
+      "schema": "User",
+      "description": "Global user accounts."
+    },
+    "doctors": {
+      "schema": "DoctorProfile",
+      "description": "Specific details for doctor users."
+    },
+    "appointments": {
+      "schema": "Appointment",
+      "description": "All booking records."
+    },
+    "messages": {
+      "schema": "Message",
+      "description": "Chat messages between doctors and patients."
+    },
+    "doctors/{doctorId}/slots": {
+      "schema": "Slot",
+      "description": "Individual available slots for a specific doctor."
+    }
+  }
+}

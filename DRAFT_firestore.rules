@@ -1,0 +1,85 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // 0. Global Safety Net
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // --- Helpers ---
+    function isSignedIn() {
+      return request.auth != null;
+    }
+    
+    function isEmailVerified() {
+      return isSignedIn() && request.auth.token.email_verified == true;
+    }
+
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+
+    function getUserData() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
+    }
+
+    function hasRole(role) {
+      return isSignedIn() && getUserData().role == role;
+    }
+
+    function isValidId(id) {
+       return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    // --- Collections ---
+
+    // Users
+    match /users/{userId} {
+      allow read: if isSignedIn();
+      allow create: if isOwner(userId) 
+                    && incoming().role == 'patient' // Default role for new users
+                    && incoming().keys().hasAll(['userId', 'email', 'role', 'createdAt'])
+                    && incoming().userId == request.auth.uid
+                    && incoming().email == request.auth.token.email;
+      allow update: if isOwner(userId) 
+                    && incoming().diff(existing()).affectedKeys().hasOnly(['displayName', 'photoURL']);
+    }
+
+    // Doctor Profiles
+    match /doctors/{doctorId} {
+      allow read: if isSignedIn();
+      allow write: if isOwner(doctorId) || hasRole('admin');
+    }
+
+    // Slots
+    match /doctors/{doctorId}/slots/{slotId} {
+      allow read: if isSignedIn();
+      allow write: if isOwner(doctorId) || hasRole('admin');
+    }
+
+    // Appointments
+    match /appointments/{appId} {
+      allow read: if isSignedIn() && (isOwner(existing().patientId) || isOwner(existing().doctorId));
+      allow create: if isSignedIn() 
+                    && isEmailVerified()
+                    && incoming().patientId == request.auth.uid
+                    && incoming().status == 'pending'
+                    && exists(/databases/$(database)/documents/users/$(incoming().doctorId));
+      allow update: if isSignedIn() && (isOwner(existing().patientId) || isOwner(existing().doctorId))
+                    && (
+                      // Patient: Cancel
+                      (isOwner(existing().patientId) && incoming().status == 'cancelled' && incoming().diff(existing()).affectedKeys().hasOnly(['status'])) ||
+                      // Doctor: Complete/Notes
+                      (isOwner(existing().doctorId) && incoming().diff(existing()).affectedKeys().hasAll(['status', 'notes', 'prescription']).size() >= 1)
+                    );
+    }
+  }
+}
